@@ -1,0 +1,47 @@
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Documentation
+README.md
+*.md
+docs/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Environment
+.env*
+!.env.example
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.svelte-kit/
+
+# Temporary files
+*.tmp
+*.temp
+*.log

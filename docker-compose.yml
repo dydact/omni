@@ -1,0 +1,236 @@
+version: '3.8'
+
+services:
+  # Infrastructure Services
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: clio-postgres
+    environment:
+      POSTGRES_DB: clio
+      POSTGRES_USER: clio
+      POSTGRES_PASSWORD: clio_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./services/indexer/migrations:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    networks:
+      - clio-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clio -d clio"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: clio-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - clio-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Core Services
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    container_name: clio-api-gateway
+    environment:
+      - DATABASE_URL=postgresql://clio:clio_password@postgres:5432/clio
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=your-jwt-secret-key-change-in-production
+      - RUST_LOG=info
+      - PORT=3000
+    ports:
+      - "3000:3000"
+    networks:
+      - clio-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  searcher:
+    build:
+      context: .
+      dockerfile: services/searcher/Dockerfile
+    container_name: clio-searcher
+    environment:
+      - DATABASE_URL=postgresql://clio:clio_password@postgres:5432/clio
+      - REDIS_URL=redis://redis:6379
+      - RUST_LOG=info
+      - PORT=3001
+    ports:
+      - "3001:3001"
+    networks:
+      - clio-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  indexer:
+    build:
+      context: .
+      dockerfile: services/indexer/Dockerfile
+    container_name: clio-indexer
+    environment:
+      - DATABASE_URL=postgresql://clio:clio_password@postgres:5432/clio
+      - REDIS_URL=redis://redis:6379
+      - RUST_LOG=info
+      - PORT=3002
+    ports:
+      - "3002:3002"
+    networks:
+      - clio-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ai:
+    build:
+      context: .
+      dockerfile: services/ai/Dockerfile
+    container_name: clio-ai
+    environment:
+      - DATABASE_URL=postgresql://clio:clio_password@postgres:5432/clio
+      - REDIS_URL=redis://redis:6379
+      - RUST_LOG=info
+      - PORT=3003
+      - MODEL_PATH=/models
+    ports:
+      - "3003:3003"
+    networks:
+      - clio-network
+    volumes:
+      - ai_models:/models
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Connector Services
+  google-connector:
+    build:
+      context: .
+      dockerfile: connectors/google/Dockerfile
+    container_name: clio-google-connector
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - RUST_LOG=info
+      - PORT=4001
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+    ports:
+      - "4001:4001"
+    networks:
+      - clio-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  slack-connector:
+    build:
+      context: .
+      dockerfile: connectors/slack/Dockerfile
+    container_name: clio-slack-connector
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - RUST_LOG=info
+      - PORT=4002
+      - SLACK_CLIENT_ID=${SLACK_CLIENT_ID}
+      - SLACK_CLIENT_SECRET=${SLACK_CLIENT_SECRET}
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
+    ports:
+      - "4002:4002"
+    networks:
+      - clio-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  atlassian-connector:
+    build:
+      context: .
+      dockerfile: connectors/atlassian/Dockerfile
+    container_name: clio-atlassian-connector
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - RUST_LOG=info
+      - PORT=4003
+      - ATLASSIAN_CLIENT_ID=${ATLASSIAN_CLIENT_ID}
+      - ATLASSIAN_CLIENT_SECRET=${ATLASSIAN_CLIENT_SECRET}
+    ports:
+      - "4003:4003"
+    networks:
+      - clio-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Frontend
+  frontend:
+    build:
+      context: frontend
+      dockerfile: Dockerfile
+    container_name: clio-frontend
+    environment:
+      - API_URL=http://api-gateway:3000
+      - PUBLIC_API_URL=http://localhost:3000
+    ports:
+      - "5173:5173"
+    networks:
+      - clio-network
+    depends_on:
+      - api-gateway
+    restart: unless-stopped
+
+  # Load Balancer / Reverse Proxy
+  caddy:
+    image: caddy:2-alpine
+    container_name: clio-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - clio-network
+    depends_on:
+      - frontend
+      - api-gateway
+    restart: unless-stopped
+
+networks:
+  clio-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  ai_models:
+  caddy_data:
+  caddy_config:

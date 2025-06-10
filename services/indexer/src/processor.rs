@@ -1,7 +1,7 @@
 use crate::events::ConnectorEvent;
 use crate::AppState;
 use anyhow::Result;
-use shared::db::repositories::document::DocumentRepository;
+use shared::db::repositories::DocumentRepository;
 use shared::models::Document;
 use tracing::{error, info, warn};
 use tokio::time::{interval, Duration};

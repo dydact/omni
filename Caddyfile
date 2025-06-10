@@ -1,0 +1,41 @@
+# Clio Reverse Proxy Configuration
+localhost {
+    # Frontend routes
+    handle /* {
+        reverse_proxy frontend:5173
+    }
+
+    # API routes
+    handle /api/* {
+        reverse_proxy api-gateway:3000
+    }
+
+    # Health check endpoints
+    handle /health/* {
+        reverse_proxy api-gateway:3000
+    }
+
+    # Connector OAuth callbacks
+    handle /auth/google/* {
+        reverse_proxy google-connector:4001
+    }
+
+    handle /auth/slack/* {
+        reverse_proxy slack-connector:4002
+    }
+
+    handle /auth/atlassian/* {
+        reverse_proxy atlassian-connector:4003
+    }
+
+    # Enable gzip compression
+    encode gzip
+
+    # Security headers
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy strict-origin-when-cross-origin
+    }
+}

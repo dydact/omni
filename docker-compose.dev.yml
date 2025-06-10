@@ -1,0 +1,36 @@
+version: '3.8'
+
+# Development-specific overrides
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  # Infrastructure only for development
+  postgres:
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: clio_dev
+      POSTGRES_USER: clio_dev
+      POSTGRES_PASSWORD: dev_password
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  # Override for development with hot reload
+  frontend:
+    build:
+      context: frontend
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/static:/app/static
+    environment:
+      - NODE_ENV=development
+      - API_URL=http://localhost:3000
+    command: npm run dev -- --host 0.0.0.0
+
+  # Remove production services for dev
+  caddy:
+    profiles:
+      - production
