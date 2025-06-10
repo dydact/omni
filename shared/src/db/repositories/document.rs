@@ -89,6 +89,24 @@ impl DocumentRepository {
         Ok(documents)
     }
     
+    pub async fn find_by_external_id(&self, source_id: &str, external_id: &str) -> Result<Option<Document>, DatabaseError> {
+        let document = sqlx::query_as::<_, Document>(
+            r#"
+            SELECT id, source_id, external_id, title, content, 
+                   metadata, permissions,
+                   search_vector::text as search_vector, indexed_at, created_at, updated_at
+            FROM documents
+            WHERE source_id = $1 AND external_id = $2
+            "#
+        )
+        .bind(source_id)
+        .bind(external_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        
+        Ok(document)
+    }
+    
     pub async fn create(&self, document: Document) -> Result<Document, DatabaseError> {
         let created_document = sqlx::query_as::<_, Document>(
             r#"

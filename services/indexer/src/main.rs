@@ -1,4 +1,6 @@
 mod error;
+mod events;
+mod processor;
 
 use anyhow::Result;
 use axum::{
@@ -61,13 +63,30 @@ async fn main() -> Result<()> {
         redis_client,
     };
     
-    let app = create_app(app_state);
+    let app = create_app(app_state.clone());
+    
+    let processor = processor::EventProcessor::new(app_state.clone());
+    let processor_handle = tokio::spawn(async move {
+        if let Err(e) = processor.start().await {
+            error!("Event processor failed: {}", e);
+        }
+    });
     
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("Indexer service listening on {}", addr);
     
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    
+    tokio::select! {
+        result = axum::serve(listener, app) => {
+            if let Err(e) = result {
+                error!("HTTP server failed: {}", e);
+            }
+        }
+        _ = processor_handle => {
+            error!("Event processor task completed unexpectedly");
+        }
+    }
     
     Ok(())
 }

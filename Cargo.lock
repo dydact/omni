@@ -956,10 +956,12 @@ dependencies = [
  "shared",
  "sqlx",
  "tokio",
+ "tokio-stream",
  "tower 0.4.13",
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

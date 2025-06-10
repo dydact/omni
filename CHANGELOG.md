@@ -20,3 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Implemented repository pattern for all entities
   - PostgreSQL connection pooling with sqlx
   - Type-safe database operations for User, Source, Document, and Embedding entities
+- Indexer service core infrastructure
+  - HTTP server with health check endpoint and Redis connectivity
+  - Database migration system for automatic schema setup
+- Event-driven document processing system
+  - Redis pub/sub subscriber for connector events (DocumentCreated, DocumentUpdated, DocumentDeleted)
+  - Background event processor with automatic search vector generation and database updates
