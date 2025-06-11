@@ -31,4 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - GET /documents/{id} endpoint for document retrieval with proper error handling
   - PUT /documents/{id} and DELETE /documents/{id} endpoints for document lifecycle management
   - POST /documents/bulk endpoint supporting batch operations (create/update/delete) for efficient processing
+- Comprehensive integration test suite for indexer service
+  - Real database and Redis connections without mocking for production-like testing
+  - API integration tests covering all REST endpoints with isolated test databases
+  - Event processor tests validating Redis pub/sub document lifecycle handling
+  - End-to-end flow tests combining event processing and REST API operations
+  - Test utilities with automatic database setup, migration, and cleanup
 

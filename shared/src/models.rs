@@ -45,13 +45,17 @@ pub struct Document {
     pub source_id: String,
     pub external_id: String,
     pub title: String,
-    pub content: String,
+    pub content: Option<String>,
+    pub content_type: Option<String>,
+    pub file_size: Option<i64>,
+    pub file_extension: Option<String>,
+    pub url: Option<String>,
+    pub parent_id: Option<String>,
     pub metadata: JsonValue,
     pub permissions: JsonValue,
-    pub search_vector: Option<String>,
-    pub indexed_at: Option<OffsetDateTime>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
+    pub last_indexed_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

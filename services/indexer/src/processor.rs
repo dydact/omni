@@ -8,8 +8,8 @@ use tokio::time::{interval, Duration};
 use tokio_stream::StreamExt;
 
 pub struct EventProcessor {
-    state: AppState,
-    channel: String,
+    pub state: AppState,
+    pub channel: String,
 }
 
 impl EventProcessor {
@@ -100,17 +100,21 @@ impl EventProcessor {
         let permissions_json = serde_json::to_value(&permissions)?;
         
         let document = Document {
-            id: uuid::Uuid::new_v4().to_string(),
+            id: ulid::Ulid::new().to_string(),
             source_id: source_id.clone(),
             external_id: document_id.clone(),
             title: metadata.title.unwrap_or_else(|| "Untitled".to_string()),
-            content: content.clone(),
+            content: Some(content.clone()),
+            content_type: None,
+            file_size: None,
+            file_extension: None,
+            url: None,
+            parent_id: None,
             metadata: metadata_json,
             permissions: permissions_json,
-            search_vector: None,
-            indexed_at: Some(now),
             created_at: now,
             updated_at: now,
+            last_indexed_at: now,
         };
         
         let repo = DocumentRepository::new(self.state.db_pool.pool());
@@ -141,7 +145,7 @@ impl EventProcessor {
             let doc_id = document.id.clone();
             
             document.title = metadata.title.unwrap_or(document.title);
-            document.content = content;
+            document.content = Some(content);
             document.metadata = metadata_json;
             if let Some(perms) = permissions {
                 document.permissions = serde_json::to_value(&perms)?;

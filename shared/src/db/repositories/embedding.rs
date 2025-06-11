@@ -119,12 +119,16 @@ impl EmbeddingRepository {
                     external_id: row.get("external_id"),
                     title: row.get("title"),
                     content: row.get("content"),
+                    content_type: row.get("content_type"),
+                    file_size: row.get("file_size"),
+                    file_extension: row.get("file_extension"),
+                    url: row.get("url"),
+                    parent_id: row.get("parent_id"),
                     metadata: row.get("metadata"),
                     permissions: row.get("permissions"),
-                    search_vector: row.get("search_vector"),
-                    indexed_at: row.get("indexed_at"),
                     created_at: row.get("created_at"),
                     updated_at: row.get("updated_at"),
+                    last_indexed_at: row.get("last_indexed_at"),
                 };
                 let distance: Option<f32> = row.get("distance");
                 let similarity = 1.0 - distance.unwrap_or(1.0);

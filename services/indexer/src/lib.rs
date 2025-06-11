@@ -1,26 +1,29 @@
-mod error;
-mod events;
-mod processor;
+pub mod error;
+pub mod events;
+pub mod processor;
 
-use anyhow::Result;
+pub use error::{IndexerError, Result};
+pub use events::{ConnectorEvent, DocumentMetadata, DocumentPermissions};
+pub use processor::EventProcessor;
+
+pub use axum::Router;
+pub use redis::Client as RedisClient;
+pub use shared::db::pool::DatabasePool;
+pub use serde::{Deserialize, Serialize};
+pub use serde_json::Value;
+
 use axum::{
     extract::{Path, State},
     response::Json,
     routing::{delete, get, post, put},
-    Router,
 };
 use error::Result as IndexerResult;
-use redis::Client as RedisClient;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use shared::{db::pool::DatabasePool, models::Document};
-use sqlx::{types::time::OffsetDateTime, PgPool};
-use std::{env, net::SocketAddr};
+use serde_json::json;
+use sqlx::types::time::OffsetDateTime;
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
-use tracing::{info, error};
-use ulid::Ulid;
-
+use tracing::info;
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -28,7 +31,7 @@ pub struct AppState {
     pub redis_client: RedisClient,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct CreateDocumentRequest {
     pub source_id: String,
     pub external_id: String,
@@ -38,7 +41,7 @@ pub struct CreateDocumentRequest {
     pub permissions: Value,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct UpdateDocumentRequest {
     pub title: Option<String>,
     pub content: Option<String>,
@@ -46,90 +49,24 @@ pub struct UpdateDocumentRequest {
     pub permissions: Option<Value>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct BulkDocumentOperation {
-    pub operation: String, // "create", "update", "delete"
+    pub operation: String,
     pub document_id: Option<String>,
     pub document: Option<CreateDocumentRequest>,
     pub updates: Option<UpdateDocumentRequest>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct BulkDocumentRequest {
     pub operations: Vec<BulkDocumentOperation>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct BulkDocumentResponse {
     pub success_count: usize,
     pub error_count: usize,
     pub errors: Vec<String>,
-}
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    dotenvy::dotenv().ok();
-    
-    tracing_subscriber::fmt::init();
-    
-    info!("Indexer service starting...");
-    
-    let database_url = env::var("DATABASE_URL")
-        .expect("DATABASE_URL must be set");
-    let redis_url = env::var("REDIS_URL")
-        .unwrap_or_else(|_| "redis://localhost:6379".to_string());
-    let port = env::var("PORT")
-        .unwrap_or_else(|_| "3001".to_string())
-        .parse::<u16>()
-        .expect("PORT must be a valid number");
-    
-    let db_pool = DatabasePool::new(&database_url).await
-        .map_err(|e| anyhow::anyhow!("Failed to create database pool: {}", e))?;
-    
-    // TODO: Get rid of this
-    info!("Running database migrations...");
-    match run_migrations(db_pool.pool()).await {
-        Ok(_) => info!("Database migrations completed successfully"),
-        Err(e) => {
-            error!("Failed to run migrations: {}", e);
-            return Err(e);
-        }
-    }
-    
-    let redis_client = RedisClient::open(redis_url)?;
-    info!("Redis client initialized");
-    
-    let app_state = AppState {
-        db_pool,
-        redis_client,
-    };
-    
-    let app = create_app(app_state.clone());
-    
-    let processor = processor::EventProcessor::new(app_state.clone());
-    let processor_handle = tokio::spawn(async move {
-        if let Err(e) = processor.start().await {
-            error!("Event processor failed: {}", e);
-        }
-    });
-    
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    info!("Indexer service listening on {}", addr);
-    
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    
-    tokio::select! {
-        result = axum::serve(listener, app) => {
-            if let Err(e) = result {
-                error!("HTTP server failed: {}", e);
-            }
-        }
-        _ = processor_handle => {
-            error!("Event processor task completed unexpectedly");
-        }
-    }
-    
-    Ok(())
 }
 
 pub fn create_app(state: AppState) -> Router {
@@ -163,41 +100,31 @@ async fn health_check(State(state): State<AppState>) -> IndexerResult<Json<Value
     })))
 }
 
-async fn run_migrations(pool: &PgPool) -> Result<()> {
-    sqlx::migrate!("./migrations").run(pool).await?;
-    Ok(())
-}
-
 async fn create_document(
     State(state): State<AppState>,
     Json(request): Json<CreateDocumentRequest>,
-) -> IndexerResult<Json<Document>> {
-    let document_id = Ulid::new().to_string();
+) -> IndexerResult<Json<shared::models::Document>> {
+    let document_id = Uuid::new_v4().to_string();
     let now = OffsetDateTime::now_utc();
     
-    let document = sqlx::query_as::<_, Document>(
+    let document = sqlx::query_as::<_, shared::models::Document>(
         r#"
-        INSERT INTO documents (id, source_id, external_id, title, content, metadata, permissions, created_at, updated_at, last_indexed_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        RETURNING id, source_id, external_id, title, content, content_type, file_size, file_extension, url, parent_id, metadata, permissions, created_at, updated_at, last_indexed_at
+        INSERT INTO documents (id, source_id, external_id, title, content, metadata, permissions, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING *
         "#,
     )
     .bind(&document_id)
     .bind(&request.source_id)
     .bind(&request.external_id)
     .bind(&request.title)
-    .bind(Some(&request.content))
+    .bind(&request.content)
     .bind(&request.metadata)
     .bind(&request.permissions)
     .bind(now)
     .bind(now)
-    .bind(now)
     .fetch_one(state.db_pool.pool())
-    .await
-    .map_err(|e| {
-        error!("Database error in create_document: {}", e);
-        e
-    })?;
+    .await?;
     
     info!("Created document: {}", document_id);
     Ok(Json(document))
@@ -206,8 +133,8 @@ async fn create_document(
 async fn get_document(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> IndexerResult<Json<Document>> {
-    let document = sqlx::query_as::<_, Document>(
+) -> IndexerResult<Json<shared::models::Document>> {
+    let document = sqlx::query_as::<_, shared::models::Document>(
         "SELECT * FROM documents WHERE id = $1"
     )
     .bind(&id)
@@ -224,8 +151,8 @@ async fn update_document(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(request): Json<UpdateDocumentRequest>,
-) -> IndexerResult<Json<Document>> {
-    let existing_doc = sqlx::query_as::<_, Document>(
+) -> IndexerResult<Json<shared::models::Document>> {
+    let existing_doc = sqlx::query_as::<_, shared::models::Document>(
         "SELECT * FROM documents WHERE id = $1"
     )
     .bind(&id)
@@ -237,13 +164,14 @@ async fn update_document(
         None => return Err(error::IndexerError::NotFound(format!("Document {} not found", id))),
     };
     
-    let updated_doc = sqlx::query_as::<_, Document>(
+    let updated_doc = sqlx::query_as::<_, shared::models::Document>(
         r#"
         UPDATE documents 
         SET title = COALESCE($2, title),
             content = COALESCE($3, content),
             metadata = COALESCE($4, metadata),
-            permissions = COALESCE($5, permissions)
+            permissions = COALESCE($5, permissions),
+            updated_at = $6
         WHERE id = $1
         RETURNING *
         "#,
@@ -253,6 +181,7 @@ async fn update_document(
     .bind(&request.content)
     .bind(&request.metadata)
     .bind(&request.permissions)
+    .bind(OffsetDateTime::now_utc())
     .fetch_one(state.db_pool.pool())
     .await?;
     
@@ -335,24 +264,23 @@ async fn bulk_documents(
 async fn process_create_operation(
     state: &AppState,
     request: CreateDocumentRequest,
-) -> Result<()> {
-    let document_id = Ulid::new().to_string();
+) -> anyhow::Result<()> {
+    let document_id = Uuid::new_v4().to_string();
     let now = OffsetDateTime::now_utc();
     
     sqlx::query(
         r#"
-        INSERT INTO documents (id, source_id, external_id, title, content, metadata, permissions, created_at, updated_at, last_indexed_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        INSERT INTO documents (id, source_id, external_id, title, content, metadata, permissions, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         "#,
     )
     .bind(&document_id)
     .bind(&request.source_id)
     .bind(&request.external_id)
     .bind(&request.title)
-    .bind(Some(&request.content))
+    .bind(&request.content)
     .bind(&request.metadata)
     .bind(&request.permissions)
-    .bind(now)
     .bind(now)
     .bind(now)
     .execute(state.db_pool.pool())
@@ -365,14 +293,15 @@ async fn process_update_operation(
     state: &AppState,
     id: String,
     request: UpdateDocumentRequest,
-) -> Result<()> {
+) -> anyhow::Result<()> {
     let result = sqlx::query(
         r#"
         UPDATE documents 
         SET title = COALESCE($2, title),
             content = COALESCE($3, content),
             metadata = COALESCE($4, metadata),
-            permissions = COALESCE($5, permissions)
+            permissions = COALESCE($5, permissions),
+            updated_at = $6
         WHERE id = $1
         "#,
     )
@@ -381,6 +310,7 @@ async fn process_update_operation(
     .bind(&request.content)
     .bind(&request.metadata)
     .bind(&request.permissions)
+    .bind(OffsetDateTime::now_utc())
     .execute(state.db_pool.pool())
     .await?;
     
@@ -391,7 +321,7 @@ async fn process_update_operation(
     Ok(())
 }
 
-async fn process_delete_operation(state: &AppState, id: String) -> Result<()> {
+async fn process_delete_operation(state: &AppState, id: String) -> anyhow::Result<()> {
     let result = sqlx::query("DELETE FROM documents WHERE id = $1")
         .bind(&id)
         .execute(state.db_pool.pool())

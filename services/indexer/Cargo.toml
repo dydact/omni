@@ -5,6 +5,10 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[lib]
+name = "indexer"
+path = "src/lib.rs"
+
 [[bin]]
 name = "indexer"
 path = "src/main.rs"
@@ -27,4 +31,9 @@ tower-http = { version = "0.5", features = ["trace", "cors"] }
 hyper = { version = "1.0", features = ["full"] }
 chrono = { workspace = true }
 uuid = { workspace = true }
+ulid = { workspace = true }
 shared = { path = "../../shared" }
+
+[dev-dependencies]
+axum-test = "15.3"
+futures = "0.3"

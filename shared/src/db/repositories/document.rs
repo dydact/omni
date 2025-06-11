@@ -18,9 +18,9 @@ impl DocumentRepository {
     pub async fn find_by_id(&self, id: &str) -> Result<Option<Document>, DatabaseError> {
         let document = sqlx::query_as::<_, Document>(
             r#"
-            SELECT id, source_id, external_id, title, content, 
-                   metadata, permissions,
-                   search_vector::text as search_vector, indexed_at, created_at, updated_at
+            SELECT id, source_id, external_id, title, content, content_type,
+                   file_size, file_extension, url, parent_id,
+                   metadata, permissions, created_at, updated_at, last_indexed_at
             FROM documents
             WHERE id = $1
             "#
@@ -35,9 +35,9 @@ impl DocumentRepository {
     pub async fn find_all(&self, limit: i64, offset: i64) -> Result<Vec<Document>, DatabaseError> {
         let documents = sqlx::query_as::<_, Document>(
             r#"
-            SELECT id, source_id, external_id, title, content, 
-                   metadata, permissions,
-                   search_vector::text as search_vector, indexed_at, created_at, updated_at
+            SELECT id, source_id, external_id, title, content, content_type,
+                   file_size, file_extension, url, parent_id,
+                   metadata, permissions, created_at, updated_at, last_indexed_at
             FROM documents
             ORDER BY created_at DESC
             LIMIT $1 OFFSET $2
@@ -54,12 +54,12 @@ impl DocumentRepository {
     pub async fn search(&self, query: &str, limit: i64) -> Result<Vec<Document>, DatabaseError> {
         let documents = sqlx::query_as::<_, Document>(
             r#"
-            SELECT id, source_id, external_id, title, content, 
-                   metadata, permissions,
-                   search_vector::text as search_vector, indexed_at, created_at, updated_at
+            SELECT id, source_id, external_id, title, content, content_type,
+                   file_size, file_extension, url, parent_id,
+                   metadata, permissions, created_at, updated_at, last_indexed_at
             FROM documents
-            WHERE search_vector @@ plainto_tsquery('english', $1)
-            ORDER BY ts_rank(search_vector, plainto_tsquery('english', $1)) DESC
+            WHERE tsv_content @@ plainto_tsquery('english', $1)
+            ORDER BY ts_rank(tsv_content, plainto_tsquery('english', $1)) DESC
             LIMIT $2
             "#
         )
@@ -74,9 +74,9 @@ impl DocumentRepository {
     pub async fn find_by_source(&self, source_id: &str) -> Result<Vec<Document>, DatabaseError> {
         let documents = sqlx::query_as::<_, Document>(
             r#"
-            SELECT id, source_id, external_id, title, content, 
-                   metadata, permissions,
-                   search_vector::text as search_vector, indexed_at, created_at, updated_at
+            SELECT id, source_id, external_id, title, content, content_type,
+                   file_size, file_extension, url, parent_id,
+                   metadata, permissions, created_at, updated_at, last_indexed_at
             FROM documents
             WHERE source_id = $1
             ORDER BY created_at DESC
@@ -92,9 +92,9 @@ impl DocumentRepository {
     pub async fn find_by_external_id(&self, source_id: &str, external_id: &str) -> Result<Option<Document>, DatabaseError> {
         let document = sqlx::query_as::<_, Document>(
             r#"
-            SELECT id, source_id, external_id, title, content, 
-                   metadata, permissions,
-                   search_vector::text as search_vector, indexed_at, created_at, updated_at
+            SELECT id, source_id, external_id, title, content, content_type,
+                   file_size, file_extension, url, parent_id,
+                   metadata, permissions, created_at, updated_at, last_indexed_at
             FROM documents
             WHERE source_id = $1 AND external_id = $2
             "#
@@ -112,9 +112,9 @@ impl DocumentRepository {
             r#"
             INSERT INTO documents (id, source_id, external_id, title, content, metadata, permissions)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING id, source_id, external_id, title, content, 
-                      metadata, permissions,
-                      search_vector::text as search_vector, indexed_at, created_at, updated_at
+            RETURNING id, source_id, external_id, title, content, content_type,
+                      file_size, file_extension, url, parent_id,
+                      metadata, permissions, created_at, updated_at, last_indexed_at
             "#
         )
         .bind(&document.id)
@@ -142,9 +142,9 @@ impl DocumentRepository {
             UPDATE documents
             SET title = $2, content = $3, metadata = $4, permissions = $5
             WHERE id = $1
-            RETURNING id, source_id, external_id, title, content, 
-                      metadata, permissions,
-                      search_vector::text as search_vector, indexed_at, created_at, updated_at
+            RETURNING id, source_id, external_id, title, content, content_type,
+                      file_size, file_extension, url, parent_id,
+                      metadata, permissions, created_at, updated_at, last_indexed_at
             "#
         )
         .bind(id)
@@ -167,23 +167,14 @@ impl DocumentRepository {
         Ok(result.rows_affected() > 0)
     }
     
-    pub async fn update_search_vector(&self, id: &str) -> Result<(), DatabaseError> {
-        sqlx::query(
-            r#"
-            UPDATE documents 
-            SET search_vector = to_tsvector('english', coalesce(title, '') || ' ' || coalesce(content, ''))
-            WHERE id = $1
-            "#
-        )
-        .bind(id)
-        .execute(&self.pool)
-        .await?;
-        
+    pub async fn update_search_vector(&self, _id: &str) -> Result<(), DatabaseError> {
+        // The tsv_content column is automatically generated, so this method is now a no-op
+        // We keep it for compatibility but it doesn't need to do anything
         Ok(())
     }
     
     pub async fn mark_as_indexed(&self, id: &str) -> Result<(), DatabaseError> {
-        sqlx::query("UPDATE documents SET indexed_at = CURRENT_TIMESTAMP WHERE id = $1")
+        sqlx::query("UPDATE documents SET last_indexed_at = CURRENT_TIMESTAMP WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
             .await?;
