@@ -2,6 +2,8 @@ pub mod db;
 pub mod models;
 pub mod traits;
 
+pub mod test_utils;
+
 pub use db::repositories::{
     DocumentRepository, EmbeddingRepository, SourceRepository, UserRepository,
 };

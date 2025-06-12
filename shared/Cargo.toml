@@ -12,7 +12,12 @@ sqlx = { workspace = true, features = ["runtime-tokio-rustls", "postgres", "uuid
 pgvector = { workspace = true, features = ["serde"] }
 time = { workspace = true }
 uuid = { workspace = true }
+ulid = { workspace = true }
 async-trait = "0.1"
 thiserror = "1.0"
 tokio = { workspace = true }
 tracing = { workspace = true }
+anyhow = { workspace = true }
+redis = { workspace = true }
+tracing-subscriber = { workspace = true }
+dotenvy = { workspace = true }

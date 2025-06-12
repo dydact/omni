@@ -27,7 +27,7 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 dotenvy = { workspace = true }
 axum = { version = "0.7", features = ["tokio"] }
-tower = { version = "0.4" }
+tower = { version = "0.4", features = ["util"] }
 tower-http = { version = "0.5", features = ["trace", "cors"] }
 hyper = { version = "1.0", features = ["full"] }
 chrono = { workspace = true }
@@ -36,3 +36,6 @@ ulid = { workspace = true }
 bytes = "1.0"
 reqwest = { version = "0.11", features = ["json"] }
 shared = { path = "../../shared" }
+
+[dev-dependencies]
+urlencoding = "2.1"

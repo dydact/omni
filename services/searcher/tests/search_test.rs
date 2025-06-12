@@ -1,5 +1,5 @@
-use searcher::models::{SearchMode, SearchRequest, SuggestionsQuery};
-use serde_json::json;
+use searcher::models::{SearchMode, SearchRequest};
+use tower::ServiceExt;
 
 #[tokio::test]
 async fn test_health_check() {
@@ -186,7 +186,7 @@ async fn create_test_app() -> axum::Router {
     let redis_url = std::env::var("REDIS_URL")
         .unwrap_or_else(|_| "redis://localhost:6379".to_string());
     
-    let db_pool = DatabasePool::connect(&database_url)
+    let db_pool = DatabasePool::new(&database_url)
         .await
         .expect("Failed to connect to test database");
     
@@ -194,7 +194,7 @@ async fn create_test_app() -> axum::Router {
         .expect("Failed to create Redis client");
     
     searcher::create_app(searcher::AppState {
-        db_pool: db_pool.inner().clone(),
+        db_pool: db_pool.pool().clone(),
         redis_client,
     })
 }
