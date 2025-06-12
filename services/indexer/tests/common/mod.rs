@@ -21,7 +21,7 @@ impl TestFixture {
     pub fn app(&self) -> &axum::Router {
         &self.app
     }
-    
+
     /// Manually cleanup the test database (automatically called on drop)
     pub async fn cleanup(&self) -> Result<()> {
         let base_url = env::var("DATABASE_URL")
@@ -35,13 +35,16 @@ impl Drop for TestFixture {
         let db_name = self.db_name.clone();
         let base_url = env::var("DATABASE_URL")
             .unwrap_or_else(|_| "postgresql://clio:clio_password@localhost:5432/clio".to_string());
-        
+
         // Best effort cleanup - if we're in a panic, skip cleanup
         if std::thread::panicking() {
-            eprintln!("Warning: Test panicked, database {} may not be cleaned up", db_name);
+            eprintln!(
+                "Warning: Test panicked, database {} may not be cleaned up",
+                db_name
+            );
             return;
         }
-        
+
         // Try to spawn cleanup task if we have a tokio runtime available
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let cleanup_db_name = db_name.clone();
@@ -49,12 +52,20 @@ impl Drop for TestFixture {
             // Spawn and detach the cleanup task - it will run in the background
             let _ = handle.spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await; // Give test time to finish
-                if let Err(e) = cleanup_test_database_by_name(&cleanup_base_url, &cleanup_db_name).await {
-                    eprintln!("Warning: Failed to cleanup test database {}: {:?}", cleanup_db_name, e);
+                if let Err(e) =
+                    cleanup_test_database_by_name(&cleanup_base_url, &cleanup_db_name).await
+                {
+                    eprintln!(
+                        "Warning: Failed to cleanup test database {}: {:?}",
+                        cleanup_db_name, e
+                    );
                 }
             });
         } else {
-            eprintln!("Warning: No tokio runtime available, database {} may not be cleaned up", db_name);
+            eprintln!(
+                "Warning: No tokio runtime available, database {} may not be cleaned up",
+                db_name
+            );
         }
     }
 }
@@ -77,22 +88,6 @@ pub async fn setup_test_fixture() -> Result<TestFixture> {
         app,
         db_name,
     })
-}
-
-/// Legacy function - prefer setup_test_fixture() for automatic cleanup
-pub async fn setup_test_app() -> Result<(AppState, axum::Router)> {
-    tracing_subscriber::fmt::try_init().ok();
-    let db_pool = setup_test_database().await?;
-    let redis_client = setup_test_redis().await?;
-
-    let app_state = AppState {
-        db_pool,
-        redis_client,
-    };
-
-    let app = create_app(app_state.clone());
-
-    Ok((app_state, app))
 }
 
 /// Internal function that returns both pool and database name
@@ -122,12 +117,6 @@ async fn setup_test_database_internal() -> Result<(DatabasePool, String)> {
     seed_test_data(db_pool.pool()).await?;
 
     Ok((db_pool, test_db_name))
-}
-
-/// Legacy function - returns only the pool
-pub async fn setup_test_database() -> Result<DatabasePool> {
-    let (pool, _) = setup_test_database_internal().await?;
-    Ok(pool)
 }
 
 pub async fn setup_test_redis() -> Result<RedisClient> {
@@ -180,24 +169,6 @@ async fn cleanup_test_database_by_name(base_url: &str, db_name: &str) -> Result<
     }
 
     let (base_url_without_db, _) = base_url.rsplit_once('/').unwrap();
-    let admin_url = format!("{}/postgres", base_url_without_db);
-    let admin_pool = PgPool::connect(&admin_url).await?;
-
-    sqlx::query(&format!("DROP DATABASE IF EXISTS {} WITH (FORCE)", db_name))
-        .execute(&admin_pool)
-        .await?;
-
-    Ok(())
-}
-
-/// Legacy cleanup function - prefer using TestFixture for automatic cleanup
-pub async fn cleanup_test_database(db_pool: &DatabasePool) -> Result<()> {
-    let db_url = env::var("DATABASE_URL")?;
-    let (base_url_without_db, db_name) = db_url.rsplit_once('/').unwrap();
-
-    // Close all connections to the test database
-    db_pool.pool().close().await;
-
     let admin_url = format!("{}/postgres", base_url_without_db);
     let admin_pool = PgPool::connect(&admin_url).await?;
 
@@ -297,3 +268,4 @@ pub async fn wait_for_document_deleted(
         )),
     }
 }
+
