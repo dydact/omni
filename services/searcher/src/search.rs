@@ -2,19 +2,18 @@ use crate::models::{SearchMode, SearchRequest, SearchResponse, SearchResult, Sug
 use anyhow::Result;
 use redis::{AsyncCommands, Client as RedisClient};
 use shared::db::repositories::{DocumentRepository, EmbeddingRepository};
-use shared::AiClient;
-use sqlx::PgPool;
+use shared::{AiClient, DatabasePool};
 use std::time::Instant;
 use tracing::info;
 
 pub struct SearchEngine {
-    db_pool: PgPool,
+    db_pool: DatabasePool,
     redis_client: RedisClient,
     ai_client: AiClient,
 }
 
 impl SearchEngine {
-    pub fn new(db_pool: PgPool, redis_client: RedisClient, ai_client: AiClient) -> Self {
+    pub fn new(db_pool: DatabasePool, redis_client: RedisClient, ai_client: AiClient) -> Self {
         Self { db_pool, redis_client, ai_client }
     }
 
@@ -40,7 +39,7 @@ impl SearchEngine {
             }
         }
 
-        let repo = DocumentRepository::new(&self.db_pool);
+        let repo = DocumentRepository::new(self.db_pool.pool());
         let limit = request.limit();
 
         let results = if request.query.trim().is_empty() {
@@ -148,7 +147,7 @@ impl SearchEngine {
 
         let query_embedding = self.generate_query_embedding(&request.query).await?;
 
-        let embedding_repo = EmbeddingRepository::new(&self.db_pool);
+        let embedding_repo = EmbeddingRepository::new(self.db_pool.pool());
         let documents_with_scores = embedding_repo
             .find_similar(query_embedding, request.limit())
             .await?;
@@ -204,7 +203,7 @@ impl SearchEngine {
         info!("Performing hybrid search for query: '{}'", request.query);
 
         // Get results from both FTS and semantic search
-        let repo = DocumentRepository::new(&self.db_pool);
+        let repo = DocumentRepository::new(self.db_pool.pool());
         let fts_results = self.fulltext_search(&repo, request).await?;
         let semantic_results = self.semantic_search(request).await?;
 
@@ -392,7 +391,7 @@ impl SearchEngine {
         )
         .bind(format!("%{}%", query))
         .bind(limit)
-        .fetch_all(&self.db_pool)
+        .fetch_all(self.db_pool.pool())
         .await?;
 
         info!("Found {} suggestions", suggestions.len());

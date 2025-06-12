@@ -8,8 +8,7 @@ use axum::{
     Router,
 };
 use redis::Client as RedisClient;
-use shared::AiClient;
-use sqlx::PgPool;
+use shared::{AiClient, DatabasePool};
 use std::{env, net::SocketAddr};
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
@@ -60,7 +59,7 @@ impl axum::response::IntoResponse for SearcherError {
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db_pool: PgPool,
+    pub db_pool: DatabasePool,
     pub redis_client: RedisClient,
     pub ai_client: AiClient,
 }
@@ -93,9 +92,9 @@ pub async fn run_server() -> AnyhowResult<()> {
         .parse::<u16>()
         .expect("PORT must be a valid number");
 
-    let db_pool = PgPool::connect(&database_url)
+    let db_pool = DatabasePool::new(&database_url)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to connect to database: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to create database pool: {}", e))?;
 
     let redis_client = RedisClient::open(redis_url)?;
     info!("Redis client initialized");
