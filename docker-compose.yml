@@ -39,28 +39,6 @@ services:
       retries: 5
 
   # Core Services
-  api-gateway:
-    build:
-      context: .
-      dockerfile: services/api-gateway/Dockerfile
-    container_name: clio-api-gateway
-    environment:
-      - DATABASE_URL=postgresql://clio:clio_password@postgres:5432/clio
-      - REDIS_URL=redis://redis:6379
-      - JWT_SECRET=your-jwt-secret-key-change-in-production
-      - RUST_LOG=info
-      - PORT=3000
-    ports:
-      - "3000:3000"
-    networks:
-      - clio-network
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-
   searcher:
     build:
       context: .
@@ -189,21 +167,35 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # Frontend
-  frontend:
+  # Web Application (SvelteKit frontend + backend)
+  web:
     build:
-      context: frontend
+      context: web
       dockerfile: Dockerfile
-    container_name: clio-frontend
+    container_name: clio-web
     environment:
-      - API_URL=http://api-gateway:3000
-      - PUBLIC_API_URL=http://localhost:3000
+      - DATABASE_URL=postgresql://clio:clio_password@postgres:5432/clio
+      - REDIS_URL=redis://redis:6379
+      - SEARCHER_URL=http://searcher:3001
+      - INDEXER_URL=http://indexer:3002
+      - AI_SERVICE_URL=http://ai:3003
+      - SESSION_SECRET=your-session-secret-key-change-in-production
+      - PUBLIC_APP_URL=http://localhost:3000
     ports:
-      - "5173:5173"
+      - "3000:3000"
     networks:
       - clio-network
     depends_on:
-      - api-gateway
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      searcher:
+        condition: service_started
+      indexer:
+        condition: service_started
+      ai:
+        condition: service_started
     restart: unless-stopped
 
   # Load Balancer / Reverse Proxy
@@ -220,8 +212,7 @@ services:
     networks:
       - clio-network
     depends_on:
-      - frontend
-      - api-gateway
+      - web
     restart: unless-stopped
 
 networks:

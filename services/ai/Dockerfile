@@ -1,25 +1,22 @@
-# Multi-stage build for AI service
-FROM lukemathwalker/cargo-chef:latest AS chef
+FROM python:3.11-slim
+
 WORKDIR /app
 
-FROM chef AS planner
-COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
-
-FROM chef AS builder
-COPY --from=planner /app/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json
-
-COPY . .
-RUN cargo build --release --bin ai
-
-FROM debian:bookworm-slim AS runtime
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
-    ca-certificates \
+    gcc \
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
-COPY --from=builder /app/target/release/ai /usr/local/bin/ai
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-EXPOSE 3003
-CMD ["ai"]
+# Copy application code
+COPY . .
+
+# Expose port
+EXPOSE 8000
+
+# Run the application
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
