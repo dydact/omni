@@ -20,8 +20,8 @@ impl SourceRepository {
     pub async fn find_by_type(&self, source_type: &str) -> Result<Vec<Source>, DatabaseError> {
         let sources = sqlx::query_as::<_, Source>(
             r#"
-            SELECT id, name, source_type, configuration, credentials, enabled, 
-                   last_sync_at, created_at, updated_at
+            SELECT id, name, source_type, config, oauth_credentials, is_active, 
+                   last_sync_at, sync_status, sync_error, created_at, updated_at, created_by
             FROM sources
             WHERE source_type = $1
             ORDER BY created_at DESC
@@ -37,10 +37,10 @@ impl SourceRepository {
     pub async fn find_active_sources(&self) -> Result<Vec<Source>, DatabaseError> {
         let sources = sqlx::query_as::<_, Source>(
             r#"
-            SELECT id, name, source_type, configuration, credentials, enabled, 
-                   last_sync_at, created_at, updated_at
+            SELECT id, name, source_type, config, oauth_credentials, is_active, 
+                   last_sync_at, sync_status, sync_error, created_at, updated_at, created_by
             FROM sources
-            WHERE enabled = true
+            WHERE is_active = true
             ORDER BY created_at DESC
             "#
         )
@@ -65,8 +65,8 @@ impl Repository<Source, String> for SourceRepository {
     async fn find_by_id(&self, id: String) -> Result<Option<Source>, DatabaseError> {
         let source = sqlx::query_as::<_, Source>(
             r#"
-            SELECT id, name, source_type, configuration, credentials, enabled, 
-                   last_sync_at, created_at, updated_at
+            SELECT id, name, source_type, config, oauth_credentials, is_active, 
+                   last_sync_at, sync_status, sync_error, created_at, updated_at, created_by
             FROM sources
             WHERE id = $1
             "#
@@ -81,8 +81,8 @@ impl Repository<Source, String> for SourceRepository {
     async fn find_all(&self, limit: i64, offset: i64) -> Result<Vec<Source>, DatabaseError> {
         let sources = sqlx::query_as::<_, Source>(
             r#"
-            SELECT id, name, source_type, configuration, credentials, enabled, 
-                   last_sync_at, created_at, updated_at
+            SELECT id, name, source_type, config, oauth_credentials, is_active, 
+                   last_sync_at, sync_status, sync_error, created_at, updated_at, created_by
             FROM sources
             ORDER BY created_at DESC
             LIMIT $1 OFFSET $2
@@ -99,18 +99,19 @@ impl Repository<Source, String> for SourceRepository {
     async fn create(&self, source: Source) -> Result<Source, DatabaseError> {
         let created_source = sqlx::query_as::<_, Source>(
             r#"
-            INSERT INTO sources (id, name, source_type, configuration, credentials, enabled)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id, name, source_type, configuration, credentials, enabled, 
-                      last_sync_at, created_at, updated_at
+            INSERT INTO sources (id, name, source_type, config, oauth_credentials, is_active, created_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id, name, source_type, config, oauth_credentials, is_active, 
+                      last_sync_at, sync_status, sync_error, created_at, updated_at, created_by
             "#
         )
         .bind(&source.id)
         .bind(&source.name)
         .bind(&source.source_type)
-        .bind(&source.configuration)
-        .bind(&source.credentials)
-        .bind(source.enabled)
+        .bind(&source.config)
+        .bind(&source.oauth_credentials)
+        .bind(source.is_active)
+        .bind(&source.created_by)
         .fetch_one(&self.pool)
         .await
         .map_err(|e| match e {
@@ -127,19 +128,19 @@ impl Repository<Source, String> for SourceRepository {
         let updated_source = sqlx::query_as::<_, Source>(
             r#"
             UPDATE sources
-            SET name = $2, source_type = $3, configuration = $4, 
-                credentials = $5, enabled = $6
+            SET name = $2, source_type = $3, config = $4, 
+                oauth_credentials = $5, is_active = $6
             WHERE id = $1
-            RETURNING id, name, source_type, configuration, credentials, enabled, 
-                      last_sync_at, created_at, updated_at
+            RETURNING id, name, source_type, config, oauth_credentials, is_active, 
+                      last_sync_at, sync_status, sync_error, created_at, updated_at, created_by
             "#
         )
         .bind(&id)
         .bind(&source.name)
         .bind(&source.source_type)
-        .bind(&source.configuration)
-        .bind(&source.credentials)
-        .bind(source.enabled)
+        .bind(&source.config)
+        .bind(&source.oauth_credentials)
+        .bind(source.is_active)
         .fetch_optional(&self.pool)
         .await?;
         

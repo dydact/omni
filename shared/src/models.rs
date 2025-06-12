@@ -31,12 +31,15 @@ pub struct Source {
     pub id: String,
     pub name: String,
     pub source_type: String,
-    pub configuration: JsonValue,
-    pub credentials: JsonValue,
-    pub enabled: bool,
+    pub config: JsonValue,
+    pub oauth_credentials: Option<JsonValue>,
+    pub is_active: bool,
     pub last_sync_at: Option<OffsetDateTime>,
+    pub sync_status: Option<String>,
+    pub sync_error: Option<String>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
+    pub created_by: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

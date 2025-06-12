@@ -19,11 +19,12 @@ use axum::{
 };
 use error::Result as IndexerResult;
 use serde_json::json;
-use sqlx::types::time::OffsetDateTime;
+use sqlx::{types::time::OffsetDateTime, PgPool};
+use std::{env, net::SocketAddr};
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
-use tracing::info;
-use uuid::Uuid;
+use tracing::{error, info};
+use ulid::Ulid;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -72,11 +73,12 @@ pub struct BulkDocumentResponse {
 pub fn create_app(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health_check))
+        .route("/debug", post(debug_create_document))
         .route("/documents", post(create_document))
+        .route("/documents/bulk", post(bulk_documents))
         .route("/documents/:id", get(get_document))
         .route("/documents/:id", put(update_document))
         .route("/documents/:id", delete(delete_document))
-        .route("/documents/bulk", post(bulk_documents))
         .layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())
@@ -104,13 +106,13 @@ async fn create_document(
     State(state): State<AppState>,
     Json(request): Json<CreateDocumentRequest>,
 ) -> IndexerResult<Json<shared::models::Document>> {
-    let document_id = Uuid::new_v4().to_string();
+    let document_id = Ulid::new().to_string();
     let now = OffsetDateTime::now_utc();
     
     let document = sqlx::query_as::<_, shared::models::Document>(
         r#"
-        INSERT INTO documents (id, source_id, external_id, title, content, metadata, permissions, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        INSERT INTO documents (id, source_id, external_id, title, content, metadata, permissions, created_at, updated_at, last_indexed_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING *
         "#,
     )
@@ -118,9 +120,10 @@ async fn create_document(
     .bind(&request.source_id)
     .bind(&request.external_id)
     .bind(&request.title)
-    .bind(&request.content)
+    .bind(Some(&request.content))
     .bind(&request.metadata)
     .bind(&request.permissions)
+    .bind(now)
     .bind(now)
     .bind(now)
     .fetch_one(state.db_pool.pool())
@@ -265,22 +268,23 @@ async fn process_create_operation(
     state: &AppState,
     request: CreateDocumentRequest,
 ) -> anyhow::Result<()> {
-    let document_id = Uuid::new_v4().to_string();
+    let document_id = Ulid::new().to_string();
     let now = OffsetDateTime::now_utc();
     
     sqlx::query(
         r#"
-        INSERT INTO documents (id, source_id, external_id, title, content, metadata, permissions, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        INSERT INTO documents (id, source_id, external_id, title, content, metadata, permissions, created_at, updated_at, last_indexed_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         "#,
     )
     .bind(&document_id)
     .bind(&request.source_id)
     .bind(&request.external_id)
     .bind(&request.title)
-    .bind(&request.content)
+    .bind(Some(&request.content))
     .bind(&request.metadata)
     .bind(&request.permissions)
+    .bind(now)
     .bind(now)
     .bind(now)
     .execute(state.db_pool.pool())
@@ -332,4 +336,97 @@ async fn process_delete_operation(state: &AppState, id: String) -> anyhow::Resul
     }
     
     Ok(())
+}
+
+pub async fn run_migrations(pool: &PgPool) -> anyhow::Result<()> {
+    sqlx::migrate!("./migrations").run(pool).await?;
+    Ok(())
+}
+
+pub async fn run_server() -> anyhow::Result<()> {
+    dotenvy::dotenv().ok();
+
+    tracing_subscriber::fmt::init();
+
+    info!("Indexer service starting...");
+
+    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
+    let port = env::var("PORT")
+        .unwrap_or_else(|_| "3001".to_string())
+        .parse::<u16>()
+        .expect("PORT must be a valid number");
+
+    let db_pool = DatabasePool::new(&database_url)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to create database pool: {}", e))?;
+
+    info!("Running database migrations...");
+    match run_migrations(db_pool.pool()).await {
+        Ok(_) => info!("Database migrations completed successfully"),
+        Err(e) => {
+            error!("Failed to run migrations: {}", e);
+            return Err(e);
+        }
+    }
+
+    let redis_client = RedisClient::open(redis_url)?;
+    info!("Redis client initialized");
+
+    let app_state = AppState {
+        db_pool,
+        redis_client,
+    };
+
+    let app = create_app(app_state.clone());
+
+    let processor = processor::EventProcessor::new(app_state.clone());
+    let processor_handle = tokio::spawn(async move {
+        if let Err(e) = processor.start().await {
+            error!("Event processor failed: {}", e);
+        }
+    });
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    info!("Indexer service listening on {}", addr);
+
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+
+    tokio::select! {
+        result = axum::serve(listener, app) => {
+            if let Err(e) = result {
+                error!("HTTP server failed: {}", e);
+            }
+        }
+        _ = processor_handle => {
+            error!("Event processor task completed unexpectedly");
+        }
+    }
+
+    Ok(())
+}
+
+async fn debug_create_document(
+    State(_state): State<AppState>,
+    body: String,
+) -> IndexerResult<Json<Value>> {
+    info!("Raw request body: {}", body);
+    info!("Body length: {}", body.len());
+
+    match serde_json::from_str::<CreateDocumentRequest>(&body) {
+        Ok(req) => {
+            info!(
+                "Successfully parsed request: source_id='{}' ({}), external_id='{}' ({})",
+                req.source_id,
+                req.source_id.len(),
+                req.external_id,
+                req.external_id.len()
+            );
+            Ok(Json(json!({"status": "parsed successfully"})))
+        }
+        Err(e) => {
+            error!("Failed to parse request: {}", e);
+            Ok(Json(json!({"error": format!("Parse error: {}", e)})))
+        }
+    }
 }

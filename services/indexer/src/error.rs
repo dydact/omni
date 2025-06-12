@@ -52,23 +52,25 @@ impl From<serde_json::Error> for IndexerError {
 impl IntoResponse for IndexerError {
     fn into_response(self) -> Response {
         let (status, error_message) = match &self {
-            IndexerError::Database(_) => {
-                error!("Database error: {}", self);
-                (StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+            IndexerError::Database(db_err) => {
+                error!("Database error: {}", db_err);
+                let error_msg = format!("Database error: {}", db_err);
+                (StatusCode::INTERNAL_SERVER_ERROR, error_msg)
             }
-            IndexerError::Redis(_) => {
-                error!("Redis error: {}", self);
-                (StatusCode::INTERNAL_SERVER_ERROR, "Redis error")
+            IndexerError::Redis(redis_err) => {
+                error!("Redis error: {}", redis_err);
+                let error_msg = format!("Redis error: {}", redis_err);
+                (StatusCode::INTERNAL_SERVER_ERROR, error_msg)
             }
-            IndexerError::Serialization(_) => {
-                error!("Serialization error: {}", self);
-                (StatusCode::BAD_REQUEST, "Invalid data format")
+            IndexerError::Serialization(ser_err) => {
+                error!("Serialization error: {}", ser_err);
+                (StatusCode::BAD_REQUEST, "Invalid data format".to_string())
             }
-            IndexerError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.as_str()),
-            IndexerError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.as_str()),
+            IndexerError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
+            IndexerError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             IndexerError::Internal(msg) => {
                 error!("Internal error: {}", msg);
-                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+                (StatusCode::INTERNAL_SERVER_ERROR, msg.clone())
             }
         };
 

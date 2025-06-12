@@ -10,11 +10,11 @@ use tokio::time::{sleep, Duration};
 
 #[tokio::test]
 async fn test_full_indexing_flow() {
-    let (state, app) = common::setup_test_app().await.unwrap();
-    let server = axum_test::TestServer::new(app).unwrap();
+    let fixture = common::setup_test_fixture().await.unwrap();
+    let server = axum_test::TestServer::new(fixture.app().clone()).unwrap();
     
     // Start event processor
-    let processor = EventProcessor::new(state.clone());
+    let processor = EventProcessor::new(fixture.state.clone());
     let processor_handle = tokio::spawn(async move {
         processor.start().await
     });
@@ -23,7 +23,7 @@ async fn test_full_indexing_flow() {
     sleep(Duration::from_millis(100)).await;
     
     // Simulate connector publishing events
-    let mut redis_conn = state.redis_client.get_multiplexed_async_connection().await.unwrap();
+    let mut redis_conn = fixture.state.redis_client.get_multiplexed_async_connection().await.unwrap();
     
     // 1. Create document via event
     let create_event = ConnectorEvent::DocumentCreated {
@@ -55,7 +55,7 @@ async fn test_full_indexing_flow() {
     let _: () = redis_conn.publish("connector_events", event_json).await.unwrap();
     
     // 2. Wait for document to be created and query via REST API
-    let repo = DocumentRepository::new(state.db_pool.pool());
+    let repo = DocumentRepository::new(fixture.state.db_pool.pool());
     let doc = common::wait_for_document_exists(&repo, "01JGF7V3E0Y2R1X8P5Q7W9T4N7", "flow_doc_1", Duration::from_secs(5))
         .await
         .expect("Document should be created via event");
@@ -145,5 +145,4 @@ async fn test_full_indexing_flow() {
     assert_eq!(deleted_response.status_code(), axum::http::StatusCode::NOT_FOUND);
     
     processor_handle.abort();
-    common::cleanup_test_database(&state.db_pool).await.unwrap();
 }

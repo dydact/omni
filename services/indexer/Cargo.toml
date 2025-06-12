@@ -32,6 +32,7 @@ hyper = { version = "1.0", features = ["full"] }
 chrono = { workspace = true }
 uuid = { workspace = true }
 ulid = { workspace = true }
+bytes = "1.0"
 shared = { path = "../../shared" }
 
 [dev-dependencies]

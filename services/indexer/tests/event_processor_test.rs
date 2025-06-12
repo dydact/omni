@@ -10,9 +10,9 @@ use tokio::time::{sleep, timeout, Duration};
 
 #[tokio::test]
 async fn test_event_processor_document_created() {
-    let (state, _) = common::setup_test_app().await.unwrap();
+    let fixture = common::setup_test_fixture().await.unwrap();
 
-    let processor = EventProcessor::new(state.clone());
+    let processor = EventProcessor::new(fixture.state.clone());
 
     let processor_handle = tokio::spawn(async move { processor.start().await });
 
@@ -44,7 +44,7 @@ async fn test_event_processor_document_created() {
         },
     };
 
-    let mut redis_conn = state
+    let mut redis_conn = fixture.state
         .redis_client
         .get_multiplexed_async_connection()
         .await
@@ -55,7 +55,7 @@ async fn test_event_processor_document_created() {
         .await
         .unwrap();
 
-    let repo = DocumentRepository::new(state.db_pool.pool());
+    let repo = DocumentRepository::new(fixture.state.db_pool.pool());
     let document = common::wait_for_document_exists(&repo, source_id, doc_id, Duration::from_secs(5))
         .await
         .expect("Document should be created");
@@ -76,14 +76,13 @@ async fn test_event_processor_document_created() {
     assert_eq!(permissions["users"].as_array().unwrap().len(), 2);
 
     processor_handle.abort();
-    common::cleanup_test_database(&state.db_pool).await.unwrap();
 }
 
 #[tokio::test]
 async fn test_event_processor_document_updated() {
-    let (state, _) = common::setup_test_app().await.unwrap();
+    let fixture = common::setup_test_fixture().await.unwrap();
 
-    let processor = EventProcessor::new(state.clone());
+    let processor = EventProcessor::new(fixture.state.clone());
 
     let processor_handle = tokio::spawn(async move { processor.start().await });
 
@@ -114,7 +113,7 @@ async fn test_event_processor_document_updated() {
         },
     };
 
-    let mut redis_conn = state
+    let mut redis_conn = fixture.state
         .redis_client
         .get_multiplexed_async_connection()
         .await
@@ -126,7 +125,7 @@ async fn test_event_processor_document_updated() {
         .unwrap();
 
     // Wait for document to be created before updating
-    let repo = DocumentRepository::new(state.db_pool.pool());
+    let repo = DocumentRepository::new(fixture.state.db_pool.pool());
     let _initial_doc = common::wait_for_document_exists(&repo, source_id, doc_id, Duration::from_secs(5))
         .await
         .expect("Initial document should be created");
@@ -194,14 +193,13 @@ async fn test_event_processor_document_updated() {
     assert_eq!(permissions["groups"].as_array().unwrap().len(), 1);
 
     processor_handle.abort();
-    common::cleanup_test_database(&state.db_pool).await.unwrap();
 }
 
 #[tokio::test]
 async fn test_event_processor_document_deleted() {
-    let (state, _) = common::setup_test_app().await.unwrap();
+    let fixture = common::setup_test_fixture().await.unwrap();
 
-    let processor = EventProcessor::new(state.clone());
+    let processor = EventProcessor::new(fixture.state.clone());
 
     let processor_handle = tokio::spawn(async move { processor.start().await });
 
@@ -232,7 +230,7 @@ async fn test_event_processor_document_deleted() {
         },
     };
 
-    let mut redis_conn = state
+    let mut redis_conn = fixture.state
         .redis_client
         .get_multiplexed_async_connection()
         .await
@@ -243,7 +241,7 @@ async fn test_event_processor_document_deleted() {
         .await
         .unwrap();
 
-    let repo = DocumentRepository::new(state.db_pool.pool());
+    let repo = DocumentRepository::new(fixture.state.db_pool.pool());
     let _document = common::wait_for_document_exists(&repo, source_id, doc_id, Duration::from_secs(5))
         .await
         .expect("Document should be created");
@@ -264,20 +262,19 @@ async fn test_event_processor_document_deleted() {
         .expect("Document should be deleted");
 
     processor_handle.abort();
-    common::cleanup_test_database(&state.db_pool).await.unwrap();
 }
 
 #[tokio::test]
 async fn test_event_processor_multiple_events() {
-    let (state, _) = common::setup_test_app().await.unwrap();
+    let fixture = common::setup_test_fixture().await.unwrap();
 
-    let processor = EventProcessor::new(state.clone());
+    let processor = EventProcessor::new(fixture.state.clone());
 
     let processor_handle = tokio::spawn(async move { processor.start().await });
 
     sleep(Duration::from_millis(200)).await;
 
-    let mut redis_conn = state
+    let mut redis_conn = fixture.state
         .redis_client
         .get_multiplexed_async_connection()
         .await
@@ -315,7 +312,7 @@ async fn test_event_processor_multiple_events() {
             .unwrap();
     }
 
-    let repo = DocumentRepository::new(state.db_pool.pool());
+    let repo = DocumentRepository::new(fixture.state.db_pool.pool());
 
     // Wait for all documents to be created
     for i in 0..5 {
@@ -334,20 +331,19 @@ async fn test_event_processor_multiple_events() {
     }
 
     processor_handle.abort();
-    common::cleanup_test_database(&state.db_pool).await.unwrap();
 }
 
 #[tokio::test]
 async fn test_event_processor_invalid_event_handling() {
-    let (state, _) = common::setup_test_app().await.unwrap();
+    let fixture = common::setup_test_fixture().await.unwrap();
 
-    let processor = EventProcessor::new(state.clone());
+    let processor = EventProcessor::new(fixture.state.clone());
 
     let processor_handle = tokio::spawn(async move { processor.start().await });
 
     sleep(Duration::from_millis(200)).await;
 
-    let mut redis_conn = state
+    let mut redis_conn = fixture.state
         .redis_client
         .get_multiplexed_async_connection()
         .await
@@ -389,7 +385,7 @@ async fn test_event_processor_invalid_event_handling() {
         .await
         .unwrap();
 
-    let repo = DocumentRepository::new(state.db_pool.pool());
+    let repo = DocumentRepository::new(fixture.state.db_pool.pool());
     let document = common::wait_for_document_exists(&repo, source_id, doc_id, Duration::from_secs(5))
         .await
         .expect("Valid document should be created despite previous error");
@@ -397,6 +393,5 @@ async fn test_event_processor_invalid_event_handling() {
     assert_eq!(document.title, "Valid Document");
 
     processor_handle.abort();
-    common::cleanup_test_database(&state.db_pool).await.unwrap();
 }
 
