@@ -10,6 +10,35 @@ name = "api-gateway"
 path = "src/main.rs"
 
 [dependencies]
-tokio = { workspace = true }
+# Core framework
 axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+chrono = { workspace = true, features = ["serde"] }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# HTTP Client
+reqwest = { version = "0.11", features = ["json"] }
+
+# Authentication (will add in Phase 2)
+# tower-sessions = { version = "0.12", features = ["redis-store"] }
+# axum-login = "0.15"
+# password-auth = "1.0"
+
+# Database (via shared crate)
 shared = { path = "../../shared" }
+
+# Redis (will add in Phase 2)
+# redis = { version = "0.24", features = ["tokio-comp"] }
+
+# Rate Limiting (will add in Phase 5)
+# tower-governor = "0.1"
+
+# Tracing
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
