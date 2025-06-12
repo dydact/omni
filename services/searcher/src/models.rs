@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use shared::models::Document;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Hash, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SearchMode {
     Fulltext,
@@ -33,7 +33,7 @@ impl SearchRequest {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SearchResponse {
     pub results: Vec<SearchResult>,
     pub total_count: i64,
@@ -42,7 +42,7 @@ pub struct SearchResponse {
     pub query: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
     pub document: Document,
     pub score: f32,

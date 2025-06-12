@@ -1,5 +1,7 @@
 use crate::models::{SearchMode, SearchRequest, SearchResponse, SearchResult, SuggestionsResponse};
 use anyhow::Result;
+use redis::{AsyncCommands, Client as RedisClient};
+use serde::{Deserialize, Serialize};
 use shared::db::repositories::{DocumentRepository, EmbeddingRepository};
 use sqlx::PgPool;
 use std::time::Instant;
@@ -7,11 +9,12 @@ use tracing::{info, warn};
 
 pub struct SearchEngine {
     db_pool: PgPool,
+    redis_client: RedisClient,
 }
 
 impl SearchEngine {
-    pub fn new(db_pool: PgPool) -> Self {
-        Self { db_pool }
+    pub fn new(db_pool: PgPool, redis_client: RedisClient) -> Self {
+        Self { db_pool, redis_client }
     }
 
     pub async fn search(&self, request: SearchRequest) -> Result<SearchResponse> {
@@ -22,6 +25,19 @@ impl SearchEngine {
             request.query,
             request.search_mode()
         );
+
+        // Generate cache key based on request parameters
+        let cache_key = self.generate_cache_key(&request);
+        
+        // Try to get from cache first
+        if let Ok(mut conn) = self.redis_client.get_multiplexed_async_connection().await {
+            if let Ok(cached_response) = conn.get::<_, String>(&cache_key).await {
+                if let Ok(response) = serde_json::from_str::<SearchResponse>(&cached_response) {
+                    info!("Cache hit for query: '{}'", request.query);
+                    return Ok(response);
+                }
+            }
+        }
 
         let repo = DocumentRepository::new(&self.db_pool);
         let limit = request.limit();
@@ -55,13 +71,22 @@ impl SearchEngine {
             results.len()
         );
 
-        Ok(SearchResponse {
+        let response = SearchResponse {
             results,
             total_count,
             query_time_ms: query_time,
             has_more,
             query: request.query,
-        })
+        };
+
+        // Cache the response for 5 minutes
+        if let Ok(mut conn) = self.redis_client.get_multiplexed_async_connection().await {
+            if let Ok(response_json) = serde_json::to_string(&response) {
+                let _: Result<(), _> = conn.set_ex(&cache_key, response_json, 300).await;
+            }
+        }
+
+        Ok(response)
     }
 
     async fn fulltext_search(
@@ -99,11 +124,18 @@ impl SearchEngine {
 
         let results = documents
             .into_iter()
-            .map(|doc| SearchResult {
-                document: doc,
-                score: 1.0,
-                highlights: vec![],
-                match_type: "fulltext".to_string(),
+            .map(|doc| {
+                let highlights = if let Some(content) = &doc.content {
+                    self.extract_highlights(content, &request.query)
+                } else {
+                    vec![]
+                };
+                SearchResult {
+                    document: doc,
+                    score: 1.0,
+                    highlights,
+                    match_type: "fulltext".to_string(),
+                }
             })
             .collect();
 
@@ -164,13 +196,54 @@ impl SearchEngine {
     }
 
     async fn generate_query_embedding(&self, query: &str) -> Result<Vec<f32>> {
-        // TODO: Implement actual embedding generation via AI service
-        // For now, return a placeholder embedding
-        warn!("Using placeholder embedding for query: '{}'", query);
-
-        // Return a 1024-dimensional zero vector as placeholder
-        // This matches the intfloat/e5-large-v2 model dimensions mentioned in CLAUDE.md
-        Ok(vec![0.0; 1024])
+        // Call AI service to generate embedding
+        let ai_service_url = std::env::var("AI_SERVICE_URL").unwrap_or_else(|_| "http://ai:3003".to_string());
+        
+        #[derive(Serialize)]
+        struct EmbeddingRequest {
+            text: String,
+            model: String,
+        }
+        
+        #[derive(Deserialize)]
+        struct EmbeddingResponse {
+            embedding: Vec<f32>,
+            #[allow(dead_code)]
+            model: String,
+            dimensions: usize,
+        }
+        
+        let request = EmbeddingRequest {
+            text: query.to_string(),
+            model: "e5-large-v2".to_string(),
+        };
+        
+        let client = reqwest::Client::new();
+        let response = client
+            .post(format!("{}/embeddings", ai_service_url))
+            .json(&request)
+            .send()
+            .await;
+            
+        match response {
+            Ok(res) => {
+                if res.status().is_success() {
+                    let embedding_response: EmbeddingResponse = res.json().await?;
+                    if embedding_response.dimensions != 1024 {
+                        warn!("Unexpected embedding dimensions: {} (expected 1024)", embedding_response.dimensions);
+                    }
+                    Ok(embedding_response.embedding)
+                } else {
+                    warn!("AI service returned error status: {}, using placeholder embedding", res.status());
+                    Ok(vec![0.0; 1024])
+                }
+            }
+            Err(e) => {
+                warn!("Failed to connect to AI service: {}, using placeholder embedding", e);
+                // Return a 1024-dimensional zero vector as placeholder
+                Ok(vec![0.0; 1024])
+            }
+        }
     }
 
     async fn hybrid_search(&self, request: &SearchRequest) -> Result<Vec<SearchResult>> {
@@ -244,6 +317,104 @@ impl SearchEngine {
         // Simple normalization - in practice this would be more sophisticated
         // based on the actual FTS scoring algorithm
         score.min(1.0).max(0.0)
+    }
+
+    fn generate_cache_key(&self, request: &SearchRequest) -> String {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        
+        let mut hasher = DefaultHasher::new();
+        request.query.hash(&mut hasher);
+        request.search_mode().hash(&mut hasher);
+        request.limit().hash(&mut hasher);
+        request.offset().hash(&mut hasher);
+        
+        if let Some(sources) = &request.sources {
+            for source in sources {
+                source.hash(&mut hasher);
+            }
+        }
+        
+        if let Some(content_types) = &request.content_types {
+            for ct in content_types {
+                ct.hash(&mut hasher);
+            }
+        }
+        
+        format!("search:{:x}", hasher.finish())
+    }
+
+    fn extract_highlights(&self, content: &str, query: &str) -> Vec<String> {
+        if content.is_empty() || query.is_empty() {
+            return vec![];
+        }
+
+        let query_lower = query.to_lowercase();
+        let content_lower = content.to_lowercase();
+        let mut highlights = Vec::new();
+        
+        // Find all occurrences of the query terms
+        let terms: Vec<&str> = query_lower.split_whitespace().collect();
+        
+        for term in terms {
+            if term.len() < 3 {
+                continue; // Skip very short terms
+            }
+            
+            // Find all positions where this term appears
+            let mut search_start = 0;
+            while let Some(pos) = content_lower[search_start..].find(term) {
+                let absolute_pos = search_start + pos;
+                
+                // Extract context around the match (50 chars before and after)
+                let context_start = absolute_pos.saturating_sub(50);
+                let context_end = (absolute_pos + term.len() + 50).min(content.len());
+                
+                // Find word boundaries
+                let start = content[..context_start]
+                    .rfind(char::is_whitespace)
+                    .map(|i| i + 1)
+                    .unwrap_or(context_start);
+                    
+                let end = content[context_end..]
+                    .find(char::is_whitespace)
+                    .map(|i| context_end + i)
+                    .unwrap_or(context_end);
+                
+                let mut snippet = String::new();
+                if start > 0 {
+                    snippet.push_str("...");
+                }
+                
+                // Add the snippet with the term highlighted using markdown bold
+                let snippet_text = &content[start..end];
+                let highlighted = snippet_text.replace(
+                    &content[absolute_pos..absolute_pos + term.len()],
+                    &format!("**{}**", &content[absolute_pos..absolute_pos + term.len()])
+                );
+                snippet.push_str(&highlighted);
+                
+                if end < content.len() {
+                    snippet.push_str("...");
+                }
+                
+                highlights.push(snippet);
+                
+                // Only keep first 3 highlights per term
+                if highlights.len() >= 3 {
+                    break;
+                }
+                
+                search_start = absolute_pos + term.len();
+            }
+        }
+        
+        // Deduplicate and limit total highlights
+        highlights.sort();
+        highlights.dedup();
+        highlights.truncate(5);
+        
+        highlights
     }
 
     pub async fn suggest(&self, query: &str, limit: i64) -> Result<SuggestionsResponse> {

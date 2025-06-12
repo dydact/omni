@@ -46,4 +46,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Implemented vector similarity search using pgvector and EmbeddingRepository for AI-powered semantic results
   - Hybrid search combines FTS and semantic results with weighted scoring (60% FTS, 40% semantic)
   - Clean API design with SearchMode enum replacing multiple boolean flags for better clarity
+- Completed searcher service Phase 3 implementation
+  - AI service integration for query embedding generation with HTTP client and fallback handling
+  - Redis caching layer for search results with 5-minute TTL and query-based cache keys
+  - Search result highlights extraction with context snippets and markdown formatting
+  - Unit tests for search models and request validation
 
