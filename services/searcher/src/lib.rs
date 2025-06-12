@@ -8,6 +8,7 @@ use axum::{
     Router,
 };
 use redis::Client as RedisClient;
+use shared::AiClient;
 use sqlx::PgPool;
 use std::{env, net::SocketAddr};
 use tower::ServiceBuilder;
@@ -61,6 +62,7 @@ impl axum::response::IntoResponse for SearcherError {
 pub struct AppState {
     pub db_pool: PgPool,
     pub redis_client: RedisClient,
+    pub ai_client: AiClient,
 }
 
 pub fn create_app(state: AppState) -> Router {
@@ -85,6 +87,7 @@ pub async fn run_server() -> AnyhowResult<()> {
 
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
+    let ai_service_url = env::var("AI_SERVICE_URL").unwrap_or_else(|_| "http://ai:3003".to_string());
     let port = env::var("PORT")
         .unwrap_or_else(|_| "3002".to_string())
         .parse::<u16>()
@@ -97,9 +100,13 @@ pub async fn run_server() -> AnyhowResult<()> {
     let redis_client = RedisClient::open(redis_url)?;
     info!("Redis client initialized");
 
+    let ai_client = AiClient::new(ai_service_url);
+    info!("AI client initialized");
+
     let app_state = AppState {
         db_pool,
         redis_client,
+        ai_client,
     };
 
     let app = create_app(app_state);

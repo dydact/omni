@@ -1,20 +1,21 @@
 use crate::models::{SearchMode, SearchRequest, SearchResponse, SearchResult, SuggestionsResponse};
 use anyhow::Result;
 use redis::{AsyncCommands, Client as RedisClient};
-use serde::{Deserialize, Serialize};
 use shared::db::repositories::{DocumentRepository, EmbeddingRepository};
+use shared::AiClient;
 use sqlx::PgPool;
 use std::time::Instant;
-use tracing::{info, warn};
+use tracing::info;
 
 pub struct SearchEngine {
     db_pool: PgPool,
     redis_client: RedisClient,
+    ai_client: AiClient,
 }
 
 impl SearchEngine {
-    pub fn new(db_pool: PgPool, redis_client: RedisClient) -> Self {
-        Self { db_pool, redis_client }
+    pub fn new(db_pool: PgPool, redis_client: RedisClient, ai_client: AiClient) -> Self {
+        Self { db_pool, redis_client, ai_client }
     }
 
     pub async fn search(&self, request: SearchRequest) -> Result<SearchResponse> {
@@ -196,54 +197,7 @@ impl SearchEngine {
     }
 
     async fn generate_query_embedding(&self, query: &str) -> Result<Vec<f32>> {
-        // Call AI service to generate embedding
-        let ai_service_url = std::env::var("AI_SERVICE_URL").unwrap_or_else(|_| "http://ai:3003".to_string());
-        
-        #[derive(Serialize)]
-        struct EmbeddingRequest {
-            text: String,
-            model: String,
-        }
-        
-        #[derive(Deserialize)]
-        struct EmbeddingResponse {
-            embedding: Vec<f32>,
-            #[allow(dead_code)]
-            model: String,
-            dimensions: usize,
-        }
-        
-        let request = EmbeddingRequest {
-            text: query.to_string(),
-            model: "e5-large-v2".to_string(),
-        };
-        
-        let client = reqwest::Client::new();
-        let response = client
-            .post(format!("{}/embeddings", ai_service_url))
-            .json(&request)
-            .send()
-            .await;
-            
-        match response {
-            Ok(res) => {
-                if res.status().is_success() {
-                    let embedding_response: EmbeddingResponse = res.json().await?;
-                    if embedding_response.dimensions != 1024 {
-                        warn!("Unexpected embedding dimensions: {} (expected 1024)", embedding_response.dimensions);
-                    }
-                    Ok(embedding_response.embedding)
-                } else {
-                    warn!("AI service returned error status: {}, using placeholder embedding", res.status());
-                    Ok(vec![0.0; 1024])
-                }
-            }
-            Err(e) => {
-                warn!("Failed to connect to AI service: {}, using placeholder embedding", e);
-                // Return a 1024-dimensional zero vector as placeholder
-                Ok(vec![0.0; 1024])
-            }
-        }
+        self.ai_client.generate_embedding(query).await
     }
 
     async fn hybrid_search(&self, request: &SearchRequest) -> Result<Vec<SearchResult>> {

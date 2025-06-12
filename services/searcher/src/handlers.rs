@@ -35,7 +35,7 @@ pub async fn search(
 ) -> SearcherResult<Json<Value>> {
     info!("Received search request: {:?}", request);
 
-    let search_engine = SearchEngine::new(state.db_pool, state.redis_client);
+    let search_engine = SearchEngine::new(state.db_pool, state.redis_client, state.ai_client);
     let response = search_engine.search(request).await?;
 
     Ok(Json(serde_json::to_value(response)?))
@@ -47,7 +47,7 @@ pub async fn suggestions(
 ) -> SearcherResult<Json<Value>> {
     info!("Received suggestions request: {:?}", query);
 
-    let search_engine = SearchEngine::new(state.db_pool, state.redis_client);
+    let search_engine = SearchEngine::new(state.db_pool, state.redis_client, state.ai_client);
     let response = search_engine.suggest(&query.q, query.limit()).await?;
 
     Ok(Json(serde_json::to_value(response)?))
