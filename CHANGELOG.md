@@ -41,4 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - POST /search endpoint with query processing, source filtering, and pagination support
   - GET /suggestions endpoint for autocomplete functionality based on document titles
   - Integration with existing database schema using generated tsvector columns and GIN indexes for fast text search
+- Enhanced searcher service with semantic and hybrid search capabilities
+  - Added configurable search modes: fulltext (PostgreSQL FTS), semantic (vector similarity), and hybrid (combined)
+  - Implemented vector similarity search using pgvector and EmbeddingRepository for AI-powered semantic results
+  - Hybrid search combines FTS and semantic results with weighted scoring (60% FTS, 40% semantic)
+  - Clean API design with SearchMode enum replacing multiple boolean flags for better clarity
 

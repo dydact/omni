@@ -1,6 +1,14 @@
 use serde::{Deserialize, Serialize};
 use shared::models::Document;
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchMode {
+    Fulltext,
+    Semantic,
+    Hybrid,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SearchRequest {
     pub query: String,
@@ -8,6 +16,7 @@ pub struct SearchRequest {
     pub content_types: Option<Vec<String>>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+    pub mode: Option<SearchMode>,
 }
 
 impl SearchRequest {
@@ -17,6 +26,10 @@ impl SearchRequest {
 
     pub fn offset(&self) -> i64 {
         self.offset.unwrap_or(0).max(0)
+    }
+
+    pub fn search_mode(&self) -> &SearchMode {
+        self.mode.as_ref().unwrap_or(&SearchMode::Fulltext)
     }
 }
 
@@ -29,10 +42,11 @@ pub struct SearchResponse {
     pub query: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SearchResult {
     pub document: Document,
     pub score: f32,
+    pub highlights: Vec<String>,
     pub match_type: String,
 }
 
